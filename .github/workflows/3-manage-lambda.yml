@@ -1,0 +1,55 @@
+name: 3. Manage Lambda
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action (deploy/delete)'
+        required: true
+        default: 'deploy'
+        type: choice
+        options:
+          - deploy
+          - delete
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  FUNCTION_NAME: http-crud-tutorial-function
+  ROLE_NAME: http-crud-tutorial-role
+  TABLE_NAME: http-crud-tutorial-items
+
+jobs:
+  manage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy Lambda
+        if: github.event.inputs.action == 'deploy'
+        run: |
+          ROLE_ARN=$(aws iam get-role --role-name ${{ env.ROLE_NAME }} --query 'Role.Arn' --output text)
+          cd lambda
+          npm install
+          zip -r ../function.zip .
+          cd ..
+          aws lambda create-function \
+            --function-name ${{ env.FUNCTION_NAME }} \
+            --runtime nodejs20.x \
+            --handler index.handler \
+            --role $ROLE_ARN \
+            --zip-file fileb://function.zip \
+            --environment Variables="{TABLE_NAME=${{ env.TABLE_NAME }}}" || \
+          aws lambda update-function-code \
+            --function-name ${{ env.FUNCTION_NAME }} \
+            --zip-file fileb://function.zip
+
+      - name: Delete Lambda
+        if: github.event.inputs.action == 'delete'
+        run: |
+          aws lambda delete-function --function-name ${{ env.FUNCTION_NAME }} || true
