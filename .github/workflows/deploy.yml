@@ -1,0 +1,73 @@
+name: Deploy to AWS Lambda and DynamoDB
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  STACK_NAME: http-crud-tutorial-stack
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      # Step 1: Checkout code
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Step 2: Configure AWS credentials
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Step 3: Setup SAM CLI (if using SAM template)
+      - name: Setup AWS SAM
+        uses: aws-actions/setup-sam@v4
+
+      # Step 4: Build the Lambda function
+      - name: Build SAM application
+        run: sam build
+
+      # Step 5: Deploy to AWS
+      - name: Deploy SAM application
+        run: |
+          sam deploy \
+            --stack-name ${{ env.STACK_NAME }} \
+            --region ${{ env.AWS_REGION }} \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --capabilities CAPABILITY_NAMED_IAM
+
+      # Step 6: Output API Gateway URL
+      - name: Get API Gateway URL
+        run: |
+          aws cloudformation describe-stacks \
+            --stack-name ${{ env.STACK_NAME }} \
+            --region ${{ env.AWS_REGION }} \
+            --query 'Stacks[0].Outputs' \
+            --output table
+
+      # Step 7: Run tests (optional)
+      - name: Run integration tests
+        continue-on-error: true
+        run: |
+          API_URL=$(aws cloudformation describe-stacks \
+            --stack-name ${{ env.STACK_NAME }} \
+            --region ${{ env.AWS_REGION }} \
+            --query 'Stacks[0].Outputs[0].OutputValue' \
+            --output text)
+          echo "Testing API at: $API_URL"
+          # Add your test commands here
