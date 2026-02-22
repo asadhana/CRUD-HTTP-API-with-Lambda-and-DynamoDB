@@ -45,6 +45,16 @@ jobs:
       - name: Build SAM application
         run: sam build --template infrastructure/template.yaml
 
+      # Cleanup failed managed stack if it exists (fix for ROLLBACK_COMPLETE)
+      - name: Cleanup failed managed stack
+        run: |
+          STATE=$(aws cloudformation describe-stacks --stack-name aws-sam-cli-managed-default --region ${{ env.AWS_REGION }} --query "Stacks[0].StackStatus" --output text 2>/dev/null || echo "NOT_FOUND")
+          if [ "$STATE" == "ROLLBACK_COMPLETE" ]; then
+            echo "Deleting failed managed stack..."
+            aws cloudformation delete-stack --stack-name aws-sam-cli-managed-default --region ${{ env.AWS_REGION }}
+            aws cloudformation wait stack-delete-complete --stack-name aws-sam-cli-managed-default --region ${{ env.AWS_REGION }}
+          fi
+
       # Step 5: Deploy to AWS
       - name: Deploy SAM application
         run: |
@@ -55,7 +65,6 @@ jobs:
             --no-fail-on-empty-changeset \
             --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
             --resolve-s3 \
-            --bootstrap-stack-name ${{ env.STACK_NAME }}-bootstrap \
             --parameter-overrides Runtime=nodejs20.x
 
       # Step 6: Output API Gateway URL
