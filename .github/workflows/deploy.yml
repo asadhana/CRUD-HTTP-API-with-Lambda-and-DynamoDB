@@ -37,7 +37,7 @@ jobs:
 
       # Step 3: Setup SAM CLI (if using SAM template)
       - name: Setup AWS SAM
-        uses: aws-actions/setup-sam@v4
+        uses: aws-actions/setup-sam@v2
 
       # Step 4: Build the Lambda function
       - name: Build SAM application
