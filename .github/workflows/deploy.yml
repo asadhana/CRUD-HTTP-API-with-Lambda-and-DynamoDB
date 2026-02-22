@@ -38,6 +38,8 @@ jobs:
       # Step 3: Setup SAM CLI (if using SAM template)
       - name: Setup AWS SAM
         uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
 
       # Step 4: Build the Lambda function
       - name: Build SAM application
@@ -51,8 +53,9 @@ jobs:
             --region ${{ env.AWS_REGION }} \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
-            --capabilities CAPABILITY_NAMED_IAM \
+            --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
             --resolve-s3 \
+            --bootstrap-stack-name ${{ env.STACK_NAME }}-bootstrap \
             --parameter-overrides Runtime=nodejs20.x
 
       # Step 6: Output API Gateway URL
