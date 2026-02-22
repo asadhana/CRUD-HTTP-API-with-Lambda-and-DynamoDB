@@ -1,0 +1,101 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Serverless CRUD API with DynamoDB
+
+Globals:
+  Function:
+    Timeout: 10
+    Runtime: nodejs20.x
+    Architectures:
+      - x86_64
+
+Parameters:
+  Runtime:
+    Type: String
+    Default: nodejs20.x
+    AllowedValues:
+      - nodejs20.x
+      - python3.12
+      - python3.13
+    Description: Lambda runtime (nodejs20.x, python3.12, or python3.13)
+
+Conditions:
+  UseNodeJS: !Equals [!Ref Runtime, nodejs20.x]
+
+Resources:
+  DynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: http-crud-tutorial-items
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+  CrudFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: http-crud-tutorial-function
+      CodeUri: ../lambda/
+      Handler: !If [UseNodeJS, index.handler, index.lambda_handler]
+      Runtime: !Ref Runtime
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref DynamoDBTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DynamoDBTable
+      Events:
+        GetAllItems:
+          Type: HttpApi
+          Properties:
+            Path: /items
+            Method: GET
+            ApiId: !Ref HttpApi
+        GetItem:
+          Type: HttpApi
+          Properties:
+            Path: /items/{id}
+            Method: GET
+            ApiId: !Ref HttpApi
+        PutItem:
+          Type: HttpApi
+          Properties:
+            Path: /items
+            Method: PUT
+            ApiId: !Ref HttpApi
+        DeleteItem:
+          Type: HttpApi
+          Properties:
+            Path: /items/{id}
+            Method: DELETE
+            ApiId: !Ref HttpApi
+
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      Name: http-crud-tutorial-api
+      StageName: $default
+      CorsConfiguration:
+        AllowOrigins:
+          - "*"
+        AllowMethods:
+          - GET
+          - PUT
+          - DELETE
+        AllowHeaders:
+          - "*"
+
+Outputs:
+  ApiUrl:
+    Description: "HTTP API endpoint URL"
+    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+  FunctionName:
+    Description: "Lambda Function Name"
+    Value: !Ref CrudFunction
+  TableName:
+    Description: "DynamoDB Table Name"
+    Value: !Ref DynamoDBTable

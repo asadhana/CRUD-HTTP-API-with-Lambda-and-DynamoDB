@@ -1,0 +1,36 @@
+# AWS SAM
+.aws-sam/
+samconfig.toml
+
+# Node.js
+node_modules/
+package-lock.json
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# AWS
+*.pem
+credentials
