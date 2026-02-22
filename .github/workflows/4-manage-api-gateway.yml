@@ -1,0 +1,57 @@
+name: 4. Manage API Gateway
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action (deploy/delete)'
+        required: true
+        default: 'deploy'
+        type: choice
+        options:
+          - deploy
+          - delete
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  API_NAME: http-crud-tutorial-api
+  FUNCTION_NAME: http-crud-tutorial-function
+
+jobs:
+  manage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy API Gateway
+        if: github.event.inputs.action == 'deploy'
+        run: |
+          API_ID=$(aws apigatewayv2 create-api --name ${{ env.API_NAME }} --protocol-type HTTP --query 'ApiId' --output text)
+
+          # Create default stage
+          aws apigatewayv2 create-stage --api-id $API_ID --stage-name '$default' --auto-deploy
+
+          LAMBDA_ARN=$(aws lambda get-function --function-name ${{ env.FUNCTION_NAME }} --query 'Configuration.FunctionArn' --output text)
+          INTEGRATION_ID=$(aws apigatewayv2 create-integration --api-id $API_ID --integration-type AWS_PROXY --integration-uri $LAMBDA_ARN --payload-format-version 2.0 --query 'IntegrationId' --output text)
+
+          aws apigatewayv2 create-route --api-id $API_ID --route-key "GET /items/{id}" --target integrations/$INTEGRATION_ID
+          aws apigatewayv2 create-route --api-id $API_ID --route-key "GET /items" --target integrations/$INTEGRATION_ID
+          aws apigatewayv2 create-route --api-id $API_ID --route-key "PUT /items" --target integrations/$INTEGRATION_ID
+          aws apigatewayv2 create-route --api-id $API_ID --route-key "DELETE /items/{id}" --target integrations/$INTEGRATION_ID
+
+          aws lambda add-permission --function-name ${{ env.FUNCTION_NAME }} --statement-id apigateway-access --action lambda:InvokeFunction --principal apigateway.amazonaws.com --source-arn "arn:aws:execute-api:${{ env.AWS_REGION }}:${{ secrets.AWS_ACCOUNT_ID }}:${API_ID}/*/*/*" || true
+
+          echo "API URL: https://${API_ID}.execute-api.${{ env.AWS_REGION }}.amazonaws.com"
+
+      - name: Delete API Gateway
+        if: github.event.inputs.action == 'delete'
+        run: |
+          API_ID=$(aws apigatewayv2 get-apis --query "Items[?Name=='${{ env.API_NAME }}'].ApiId" --output text)
+          if [ ! -z "$API_ID" ] && [ "$API_ID" != "None" ]; then
+            aws apigatewayv2 delete-api --api-id $API_ID
+          fi

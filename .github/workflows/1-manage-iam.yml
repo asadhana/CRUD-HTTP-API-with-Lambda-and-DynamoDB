@@ -1,0 +1,57 @@
+name: 1. Manage IAM
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action (deploy/delete)'
+        required: true
+        default: 'deploy'
+        type: choice
+        options:
+          - deploy
+          - delete
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  ROLE_NAME: http-crud-tutorial-role
+  TABLE_NAME: http-crud-tutorial-items
+
+jobs:
+  manage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy IAM
+        if: github.event.inputs.action == 'deploy'
+        run: |
+          aws iam create-role --role-name ${{ env.ROLE_NAME }} --assume-role-policy-document '{
+            "Version": "2012-10-17",
+            "Statement": [{
+              "Effect": "Allow",
+              "Principal": {"Service": "lambda.amazonaws.com"},
+              "Action": "sts:AssumeRole"
+            }]
+          }'
+          aws iam attach-role-policy --role-name ${{ env.ROLE_NAME }} --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+          aws iam put-role-policy --role-name ${{ env.ROLE_NAME }} --policy-name DynamoDBAccess --policy-document '{
+            "Version": "2012-10-17",
+            "Statement": [{
+              "Effect": "Allow",
+              "Action": ["dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:Scan", "dynamodb:DeleteItem", "dynamodb:UpdateItem"],
+              "Resource": "arn:aws:dynamodb:*:*:table/${{ env.TABLE_NAME }}"
+            }]
+          }'
+
+      - name: Delete IAM
+        if: github.event.inputs.action == 'delete'
+        run: |
+          aws iam delete-role-policy --role-name ${{ env.ROLE_NAME }} --policy-name DynamoDBAccess || true
+          aws iam detach-role-policy --role-name ${{ env.ROLE_NAME }} --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole || true
+          aws iam delete-role --role-name ${{ env.ROLE_NAME }} || true
