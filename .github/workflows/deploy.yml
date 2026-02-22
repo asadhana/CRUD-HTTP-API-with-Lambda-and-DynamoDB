@@ -7,9 +7,11 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
 
 env:
   AWS_REGION: ${{ secrets.AWS_REGION }}
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
   STACK_NAME: http-crud-tutorial-stack
 
 jobs:
@@ -35,11 +37,23 @@ jobs:
 
       # Step 3: Setup SAM CLI (if using SAM template)
       - name: Setup AWS SAM
-        uses: aws-actions/setup-sam@v4
+        uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
 
       # Step 4: Build the Lambda function
       - name: Build SAM application
-        run: sam build
+        run: sam build --template infrastructure/template.yaml
+
+      # Cleanup failed managed stack if it exists (fix for ROLLBACK_COMPLETE)
+      - name: Cleanup failed managed stack
+        run: |
+          STATE=$(aws cloudformation describe-stacks --stack-name aws-sam-cli-managed-default --region ${{ env.AWS_REGION }} --query "Stacks[0].StackStatus" --output text 2>/dev/null || echo "NOT_FOUND")
+          if [ "$STATE" == "ROLLBACK_COMPLETE" ]; then
+            echo "Deleting failed managed stack..."
+            aws cloudformation delete-stack --stack-name aws-sam-cli-managed-default --region ${{ env.AWS_REGION }}
+            aws cloudformation wait stack-delete-complete --stack-name aws-sam-cli-managed-default --region ${{ env.AWS_REGION }}
+          fi
 
       # Step 5: Deploy to AWS
       - name: Deploy SAM application
@@ -49,7 +63,9 @@ jobs:
             --region ${{ env.AWS_REGION }} \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
-            --capabilities CAPABILITY_NAMED_IAM
+            --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
+            --resolve-s3 \
+            --parameter-overrides Runtime=nodejs20.x
 
       # Step 6: Output API Gateway URL
       - name: Get API Gateway URL
