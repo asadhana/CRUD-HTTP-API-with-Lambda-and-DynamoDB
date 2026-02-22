@@ -7,9 +7,11 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
 
 env:
   AWS_REGION: ${{ secrets.AWS_REGION }}
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
   STACK_NAME: http-crud-tutorial-stack
 
 jobs:
@@ -39,7 +41,7 @@ jobs:
 
       # Step 4: Build the Lambda function
       - name: Build SAM application
-        run: sam build
+        run: sam build --template infrastructure/template.yaml
 
       # Step 5: Deploy to AWS
       - name: Deploy SAM application
@@ -49,7 +51,9 @@ jobs:
             --region ${{ env.AWS_REGION }} \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
-            --capabilities CAPABILITY_NAMED_IAM
+            --capabilities CAPABILITY_NAMED_IAM \
+            --resolve-s3 \
+            --parameter-overrides Runtime=nodejs20.x
 
       # Step 6: Output API Gateway URL
       - name: Get API Gateway URL
