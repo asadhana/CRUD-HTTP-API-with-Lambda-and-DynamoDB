@@ -31,7 +31,11 @@ jobs:
       - name: Deploy API Gateway
         if: github.event.inputs.action == 'deploy'
         run: |
-          API_ID=$(aws apigatewayv2 create-api --name ${{ env.API_NAME }} --protocol-type HTTP --query 'ApiId' --output text)
+          API_ID=$(aws apigatewayv2 create-api \
+            --name ${{ env.API_NAME }} \
+            --protocol-type HTTP \
+            --cors-configuration '{"AllowOrigins": ["*"], "AllowMethods": ["GET", "PUT", "DELETE", "OPTIONS"], "AllowHeaders": ["Content-Type"]}' \
+            --query 'ApiId' --output text)
 
           # Create default stage
           aws apigatewayv2 create-stage --api-id $API_ID --stage-name '$default' --auto-deploy
