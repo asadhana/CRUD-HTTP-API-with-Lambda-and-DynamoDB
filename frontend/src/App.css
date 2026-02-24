@@ -19,6 +19,32 @@
   font-weight: bold;
 }
 
+.auth-section {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.auth-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.auth-status.authenticated {
+  background-color: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+}
+
+.auth-status.not-authenticated {
+  background-color: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+}
+
 .auth-btn {
   background-color: #ff9900;
   border: none;

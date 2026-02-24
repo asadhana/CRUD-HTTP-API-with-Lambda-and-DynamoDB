@@ -13,6 +13,8 @@ const dynamo = DynamoDBDocumentClient.from(client);
 const tableName = process.env.TABLE_NAME || "http-crud-tutorial-items";
 
 exports.handler = async (event) => {
+  console.log('Event:', JSON.stringify(event, null, 2));
+  
   let body;
   let statusCode = 200;
   const headers = {
@@ -24,8 +26,17 @@ exports.handler = async (event) => {
 
   try {
     const routeKey = `${event.requestContext.http.method} ${event.requestContext.http.path}`;
+    console.log('Route Key:', routeKey);
     
     switch (routeKey) {
+      case "OPTIONS /items":
+      case "OPTIONS /items/{id}":
+        // Handle preflight requests
+        console.log('Handling OPTIONS request');
+        statusCode = 200;
+        body = "";
+        break;
+        
       case "DELETE /items/{id}":
         await dynamo.send(
           new DeleteCommand({
@@ -76,15 +87,19 @@ exports.handler = async (event) => {
         throw new Error(`Unsupported route: "${routeKey}"`);
     }
   } catch (err) {
+    console.error('Error:', err);
     statusCode = 400;
     body = err.message;
   } finally {
     body = JSON.stringify(body);
   }
 
-  return {
+  const response = {
     statusCode,
     body,
     headers,
   };
+  
+  console.log('Response:', JSON.stringify(response, null, 2));
+  return response;
 };
