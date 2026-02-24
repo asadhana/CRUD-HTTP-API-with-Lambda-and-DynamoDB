@@ -1,0 +1,124 @@
+name: 6. Configure API Authorization
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action (enable/disable)'
+        required: true
+        default: 'enable'
+        type: choice
+        options:
+          - enable
+          - disable
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  API_NAME: http-crud-tutorial-api
+  USER_POOL_NAME: http-crud-tutorial-users
+  AUTHORIZER_NAME: CognitoAuthorizer
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Enable Authorization
+        if: github.event.inputs.action == 'enable'
+        run: |
+          # Get API ID
+          API_ID=$(aws apigatewayv2 get-apis --query "Items[?Name=='${{ env.API_NAME }}'].ApiId" --output text)
+          if [ -z "$API_ID" ] || [ "$API_ID" == "None" ]; then
+            echo "Error: API not found. Please run workflow 4 (Manage API Gateway) first."
+            exit 1
+          fi
+          echo "Found API ID: $API_ID"
+
+          # Get User Pool ID
+          USER_POOL_ID=$(aws cognito-idp list-user-pools --max-results 60 --query "UserPools[?Name=='${{ env.USER_POOL_NAME }}'].Id" --output text)
+          if [ -z "$USER_POOL_ID" ] || [ "$USER_POOL_ID" == "None" ]; then
+            echo "Error: User Pool not found. Please run workflow 5 (Manage Cognito) first."
+            exit 1
+          fi
+          echo "Found User Pool ID: $USER_POOL_ID"
+
+          # Get App Client ID
+          APP_CLIENT_ID=$(aws cognito-idp list-user-pool-clients --user-pool-id $USER_POOL_ID --max-results 60 --query "UserPoolClients[?ClientName=='http-crud-tutorial-app'].ClientId" --output text)
+          if [ -z "$APP_CLIENT_ID" ] || [ "$APP_CLIENT_ID" == "None" ]; then
+            echo "Error: App Client not found."
+            exit 1
+          fi
+          echo "Found App Client ID: $APP_CLIENT_ID"
+
+          # Create JWT Authorizer
+          ISSUER_URL="https://cognito-idp.${{ env.AWS_REGION }}.amazonaws.com/$USER_POOL_ID"
+          
+          AUTHORIZER_ID=$(aws apigatewayv2 create-authorizer \
+            --api-id $API_ID \
+            --authorizer-type JWT \
+            --identity-source '$request.header.Authorization' \
+            --name ${{ env.AUTHORIZER_NAME }} \
+            --jwt-configuration Audience=$APP_CLIENT_ID,Issuer=$ISSUER_URL \
+            --query 'AuthorizerId' --output text)
+
+          echo "Created Authorizer with ID: $AUTHORIZER_ID"
+
+          # Get all routes and attach authorizer (except OPTIONS routes)
+          ROUTES=$(aws apigatewayv2 get-routes --api-id $API_ID --query 'Items[?!starts_with(RouteKey, `OPTIONS`)].RouteId' --output text)
+          
+          for ROUTE_ID in $ROUTES; do
+            ROUTE_KEY=$(aws apigatewayv2 get-route --api-id $API_ID --route-id $ROUTE_ID --query 'RouteKey' --output text)
+            echo "Attaching authorizer to route: $ROUTE_KEY"
+            aws apigatewayv2 update-route \
+              --api-id $API_ID \
+              --route-id $ROUTE_ID \
+              --authorization-type JWT \
+              --authorizer-id $AUTHORIZER_ID
+          done
+
+          echo "=========================================="
+          echo "API Authorization configured successfully!"
+          echo "All CRUD routes now require JWT authentication"
+          echo "OPTIONS routes remain public (for CORS)"
+          echo "=========================================="
+
+      - name: Disable Authorization
+        if: github.event.inputs.action == 'disable'
+        run: |
+          # Get API ID
+          API_ID=$(aws apigatewayv2 get-apis --query "Items[?Name=='${{ env.API_NAME }}'].ApiId" --output text)
+          if [ -z "$API_ID" ] || [ "$API_ID" == "None" ]; then
+            echo "Error: API not found."
+            exit 1
+          fi
+          echo "Found API ID: $API_ID"
+
+          # Remove authorization from all routes
+          ROUTES=$(aws apigatewayv2 get-routes --api-id $API_ID --query 'Items[].RouteId' --output text)
+          
+          for ROUTE_ID in $ROUTES; do
+            ROUTE_KEY=$(aws apigatewayv2 get-route --api-id $API_ID --route-id $ROUTE_ID --query 'RouteKey' --output text)
+            echo "Removing authorization from route: $ROUTE_KEY"
+            aws apigatewayv2 update-route \
+              --api-id $API_ID \
+              --route-id $ROUTE_ID \
+              --authorization-type NONE || true
+          done
+
+          # Delete authorizer
+          AUTHORIZER_ID=$(aws apigatewayv2 get-authorizers --api-id $API_ID --query "Items[?Name=='${{ env.AUTHORIZER_NAME }}'].AuthorizerId" --output text)
+          if [ ! -z "$AUTHORIZER_ID" ] && [ "$AUTHORIZER_ID" != "None" ]; then
+            echo "Deleting authorizer: $AUTHORIZER_ID"
+            aws apigatewayv2 delete-authorizer --api-id $API_ID --authorizer-id $AUTHORIZER_ID
+          fi
+
+          echo "=========================================="
+          echo "API Authorization disabled successfully!"
+          echo "All routes are now public (no authentication required)"
+          echo "=========================================="

@@ -1,0 +1,129 @@
+name: 5. Manage Cognito
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action (deploy/delete)'
+        required: true
+        default: 'deploy'
+        type: choice
+        options:
+          - deploy
+          - delete
+      test_user_email:
+        description: 'Test user email (for deploy only)'
+        required: false
+        default: 'testuser@example.com'
+      test_user_password:
+        description: 'Test user password (for deploy only)'
+        required: false
+        default: 'TempPass123!'
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  USER_POOL_NAME: http-crud-tutorial-users
+  APP_CLIENT_NAME: http-crud-tutorial-app
+
+jobs:
+  manage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy Cognito User Pool
+        if: github.event.inputs.action == 'deploy'
+        run: |
+          echo "Creating Cognito User Pool..."
+          
+          # Create User Pool
+          USER_POOL_ID=$(aws cognito-idp create-user-pool \
+            --pool-name ${{ env.USER_POOL_NAME }} \
+            --policies '{
+              "PasswordPolicy": {
+                "MinimumLength": 8,
+                "RequireUppercase": true,
+                "RequireLowercase": true,
+                "RequireNumbers": true,
+                "RequireSymbols": true
+              }
+            }' \
+            --auto-verified-attributes email \
+            --username-attributes email \
+            --mfa-configuration OFF \
+            --email-configuration EmailSendingAccount=COGNITO_DEFAULT \
+            --query 'UserPool.Id' --output text)
+
+          echo "User Pool created with ID: $USER_POOL_ID"
+
+          # Create App Client (without client secret for public apps)
+          APP_CLIENT_ID=$(aws cognito-idp create-user-pool-client \
+            --user-pool-id $USER_POOL_ID \
+            --client-name ${{ env.APP_CLIENT_NAME }} \
+            --no-generate-secret \
+            --explicit-auth-flows ALLOW_USER_PASSWORD_AUTH ALLOW_REFRESH_TOKEN_AUTH \
+            --query 'UserPoolClient.ClientId' --output text)
+
+          echo "App Client created with ID: $APP_CLIENT_ID"
+
+          # Create test user if email and password provided
+          if [ ! -z "${{ github.event.inputs.test_user_email }}" ] && [ ! -z "${{ github.event.inputs.test_user_password }}" ]; then
+            echo "Creating test user..."
+            aws cognito-idp admin-create-user \
+              --user-pool-id $USER_POOL_ID \
+              --username ${{ github.event.inputs.test_user_email }} \
+              --user-attributes Name=email,Value=${{ github.event.inputs.test_user_email }} Name=email_verified,Value=true \
+              --message-action SUPPRESS || true
+
+            # Set permanent password
+            aws cognito-idp admin-set-user-password \
+              --user-pool-id $USER_POOL_ID \
+              --username ${{ github.event.inputs.test_user_email }} \
+              --password ${{ github.event.inputs.test_user_password }} \
+              --permanent
+
+            echo "Test user created and confirmed"
+          fi
+
+          echo "=========================================="
+          echo "Cognito User Pool deployed successfully!"
+          echo "User Pool ID: $USER_POOL_ID"
+          echo "App Client ID: $APP_CLIENT_ID"
+          echo "Region: ${{ env.AWS_REGION }}"
+          echo "=========================================="
+          echo ""
+          echo "Update your frontend/.env file with:"
+          echo "REACT_APP_COGNITO_USER_POOL_ID=$USER_POOL_ID"
+          echo "REACT_APP_COGNITO_CLIENT_ID=$APP_CLIENT_ID"
+          echo "REACT_APP_COGNITO_REGION=${{ env.AWS_REGION }}"
+          echo "REACT_APP_COGNITO_USERNAME=${{ github.event.inputs.test_user_email }}"
+          echo "REACT_APP_COGNITO_PASSWORD=${{ github.event.inputs.test_user_password }}"
+          echo ""
+          echo "Next step: Run workflow 6 (Configure API Authorization)"
+
+      - name: Delete Cognito User Pool
+        if: github.event.inputs.action == 'delete'
+        run: |
+          USER_POOL_ID=$(aws cognito-idp list-user-pools --max-results 60 --query "UserPools[?Name=='${{ env.USER_POOL_NAME }}'].Id" --output text)
+          
+          if [ ! -z "$USER_POOL_ID" ] && [ "$USER_POOL_ID" != "None" ]; then
+            echo "Deleting User Pool: $USER_POOL_ID"
+            
+            # Delete all app clients first
+            APP_CLIENTS=$(aws cognito-idp list-user-pool-clients --user-pool-id $USER_POOL_ID --query 'UserPoolClients[].ClientId' --output text)
+            for CLIENT_ID in $APP_CLIENTS; do
+              echo "Deleting app client: $CLIENT_ID"
+              aws cognito-idp delete-user-pool-client --user-pool-id $USER_POOL_ID --client-id $CLIENT_ID || true
+            done
+            
+            # Delete user pool
+            aws cognito-idp delete-user-pool --user-pool-id $USER_POOL_ID
+            echo "User Pool deleted successfully"
+          else
+            echo "User Pool not found"
+          fi

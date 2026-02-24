@@ -31,26 +31,56 @@ jobs:
       - name: Deploy API Gateway
         if: github.event.inputs.action == 'deploy'
         run: |
+          # Create API without CORS configuration (Lambda handles CORS)
           API_ID=$(aws apigatewayv2 create-api \
             --name ${{ env.API_NAME }} \
             --protocol-type HTTP \
-            --cors-configuration '{"AllowOrigins": ["*"], "AllowMethods": ["GET", "PUT", "DELETE", "OPTIONS"], "AllowHeaders": ["Content-Type"]}' \
             --query 'ApiId' --output text)
 
-          # Create default stage
+          echo "Created API with ID: $API_ID"
+
+          # Create default stage with auto-deploy
           aws apigatewayv2 create-stage --api-id $API_ID --stage-name '$default' --auto-deploy
 
+          # Get Lambda ARN and create integration
           LAMBDA_ARN=$(aws lambda get-function --function-name ${{ env.FUNCTION_NAME }} --query 'Configuration.FunctionArn' --output text)
-          INTEGRATION_ID=$(aws apigatewayv2 create-integration --api-id $API_ID --integration-type AWS_PROXY --integration-uri $LAMBDA_ARN --payload-format-version 2.0 --query 'IntegrationId' --output text)
+          INTEGRATION_ID=$(aws apigatewayv2 create-integration \
+            --api-id $API_ID \
+            --integration-type AWS_PROXY \
+            --integration-uri $LAMBDA_ARN \
+            --payload-format-version 2.0 \
+            --query 'IntegrationId' --output text)
 
-          aws apigatewayv2 create-route --api-id $API_ID --route-key "GET /items/{id}" --target integrations/$INTEGRATION_ID
+          echo "Created integration with ID: $INTEGRATION_ID"
+
+          # Create CRUD routes (without authorization for now)
           aws apigatewayv2 create-route --api-id $API_ID --route-key "GET /items" --target integrations/$INTEGRATION_ID
+          aws apigatewayv2 create-route --api-id $API_ID --route-key "GET /items/{id}" --target integrations/$INTEGRATION_ID
           aws apigatewayv2 create-route --api-id $API_ID --route-key "PUT /items" --target integrations/$INTEGRATION_ID
           aws apigatewayv2 create-route --api-id $API_ID --route-key "DELETE /items/{id}" --target integrations/$INTEGRATION_ID
 
-          aws lambda add-permission --function-name ${{ env.FUNCTION_NAME }} --statement-id apigateway-access --action lambda:InvokeFunction --principal apigateway.amazonaws.com --source-arn "arn:aws:execute-api:${{ env.AWS_REGION }}:${{ secrets.AWS_ACCOUNT_ID }}:${API_ID}/*/*/*" || true
+          # Create OPTIONS routes for CORS preflight (Lambda handles these)
+          aws apigatewayv2 create-route --api-id $API_ID --route-key "OPTIONS /items" --target integrations/$INTEGRATION_ID
+          aws apigatewayv2 create-route --api-id $API_ID --route-key "OPTIONS /items/{id}" --target integrations/$INTEGRATION_ID
 
+          # Grant API Gateway permission to invoke Lambda
+          aws lambda add-permission \
+            --function-name ${{ env.FUNCTION_NAME }} \
+            --statement-id apigateway-access \
+            --action lambda:InvokeFunction \
+            --principal apigateway.amazonaws.com \
+            --source-arn "arn:aws:execute-api:${{ env.AWS_REGION }}:${{ secrets.AWS_ACCOUNT_ID }}:${API_ID}/*/*/*" || true
+
+          echo "=========================================="
+          echo "API Gateway deployed successfully!"
+          echo "API ID: $API_ID"
           echo "API URL: https://${API_ID}.execute-api.${{ env.AWS_REGION }}.amazonaws.com"
+          echo "=========================================="
+          echo ""
+          echo "Next steps:"
+          echo "1. Run workflow 5 (Manage Cognito) to set up authentication"
+          echo "2. Run workflow 6 (Configure API Authorization) to secure the API"
+          echo "3. Update frontend/.env with the API URL"
 
       - name: Delete API Gateway
         if: github.event.inputs.action == 'delete'

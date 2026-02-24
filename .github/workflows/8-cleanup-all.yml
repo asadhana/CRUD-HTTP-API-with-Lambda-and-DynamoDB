@@ -1,0 +1,99 @@
+name: 8. Cleanup All Resources
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "DELETE" to confirm deletion of all resources'
+        required: true
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  API_NAME: http-crud-tutorial-api
+  FUNCTION_NAME: http-crud-tutorial-function
+  ROLE_NAME: http-crud-tutorial-role
+  TABLE_NAME: http-crud-tutorial-items
+  USER_POOL_NAME: http-crud-tutorial-users
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate Confirmation
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "DELETE" ]; then
+            echo "Error: Confirmation failed. You must type 'DELETE' to proceed."
+            exit 1
+          fi
+          echo "Confirmation validated. Proceeding with cleanup..."
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Delete API Gateway
+        run: |
+          echo "Deleting API Gateway..."
+          API_ID=$(aws apigatewayv2 get-apis --query "Items[?Name=='${{ env.API_NAME }}'].ApiId" --output text)
+          if [ ! -z "$API_ID" ] && [ "$API_ID" != "None" ]; then
+            aws apigatewayv2 delete-api --api-id $API_ID
+            echo "✓ API Gateway deleted"
+          else
+            echo "- API Gateway not found"
+          fi
+
+      - name: Delete Lambda Function
+        run: |
+          echo "Deleting Lambda function..."
+          aws lambda delete-function --function-name ${{ env.FUNCTION_NAME }} 2>/dev/null && echo "✓ Lambda function deleted" || echo "- Lambda function not found"
+
+      - name: Delete DynamoDB Table
+        run: |
+          echo "Deleting DynamoDB table..."
+          aws dynamodb delete-table --table-name ${{ env.TABLE_NAME }} 2>/dev/null && echo "✓ DynamoDB table deleted" || echo "- DynamoDB table not found"
+
+      - name: Delete Cognito User Pool
+        run: |
+          echo "Deleting Cognito User Pool..."
+          USER_POOL_ID=$(aws cognito-idp list-user-pools --max-results 60 --query "UserPools[?Name=='${{ env.USER_POOL_NAME }}'].Id" --output text)
+          
+          if [ ! -z "$USER_POOL_ID" ] && [ "$USER_POOL_ID" != "None" ]; then
+            # Delete all app clients first
+            APP_CLIENTS=$(aws cognito-idp list-user-pool-clients --user-pool-id $USER_POOL_ID --query 'UserPoolClients[].ClientId' --output text)
+            for CLIENT_ID in $APP_CLIENTS; do
+              aws cognito-idp delete-user-pool-client --user-pool-id $USER_POOL_ID --client-id $CLIENT_ID 2>/dev/null || true
+            done
+            
+            # Delete user pool
+            aws cognito-idp delete-user-pool --user-pool-id $USER_POOL_ID
+            echo "✓ Cognito User Pool deleted"
+          else
+            echo "- Cognito User Pool not found"
+          fi
+
+      - name: Delete IAM Role
+        run: |
+          echo "Deleting IAM role..."
+          aws iam delete-role-policy --role-name ${{ env.ROLE_NAME }} --policy-name DynamoDBAccess 2>/dev/null || true
+          aws iam detach-role-policy --role-name ${{ env.ROLE_NAME }} --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole 2>/dev/null || true
+          aws iam delete-role --role-name ${{ env.ROLE_NAME }} 2>/dev/null && echo "✓ IAM role deleted" || echo "- IAM role not found"
+
+      - name: Cleanup Summary
+        run: |
+          echo ""
+          echo "=========================================="
+          echo "Cleanup completed!"
+          echo "=========================================="
+          echo ""
+          echo "All AWS resources have been deleted:"
+          echo "  - API Gateway"
+          echo "  - Lambda Function"
+          echo "  - DynamoDB Table"
+          echo "  - Cognito User Pool"
+          echo "  - IAM Role"
+          echo ""
+          echo "Your AWS account is now clean."
+          echo "=========================================="

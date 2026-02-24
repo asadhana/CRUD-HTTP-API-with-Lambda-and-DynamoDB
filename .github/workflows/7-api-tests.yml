@@ -1,0 +1,139 @@
+name: 7. API Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: 'API Gateway URL (e.g. https://abc.execute-api.us-east-1.amazonaws.com)'
+        required: true
+      use_auth:
+        description: 'Use authentication?'
+        required: true
+        default: 'yes'
+        type: choice
+        options:
+          - yes
+          - no
+      cognito_username:
+        description: 'Cognito username (if using auth)'
+        required: false
+        default: 'testuser@example.com'
+      cognito_password:
+        description: 'Cognito password (if using auth)'
+        required: false
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  USER_POOL_NAME: http-crud-tutorial-users
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        if: github.event.inputs.use_auth == 'yes'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get JWT Token
+        if: github.event.inputs.use_auth == 'yes'
+        id: get_token
+        run: |
+          # Get User Pool ID and Client ID
+          USER_POOL_ID=$(aws cognito-idp list-user-pools --max-results 60 --query "UserPools[?Name=='${{ env.USER_POOL_NAME }}'].Id" --output text)
+          APP_CLIENT_ID=$(aws cognito-idp list-user-pool-clients --user-pool-id $USER_POOL_ID --max-results 60 --query "UserPoolClients[?ClientName=='http-crud-tutorial-app'].ClientId" --output text)
+          
+          echo "User Pool ID: $USER_POOL_ID"
+          echo "App Client ID: $APP_CLIENT_ID"
+
+          # Authenticate and get JWT token
+          AUTH_RESPONSE=$(aws cognito-idp initiate-auth \
+            --auth-flow USER_PASSWORD_AUTH \
+            --client-id $APP_CLIENT_ID \
+            --auth-parameters USERNAME=${{ github.event.inputs.cognito_username }},PASSWORD=${{ github.event.inputs.cognito_password }} \
+            --query 'AuthenticationResult.IdToken' --output text)
+
+          echo "JWT_TOKEN=$AUTH_RESPONSE" >> $GITHUB_OUTPUT
+          echo "Authentication successful!"
+
+      - name: Run Tests Without Authentication
+        if: github.event.inputs.use_auth == 'no'
+        run: |
+          URL=${{ github.event.inputs.api_url }}
+          echo "=========================================="
+          echo "Testing API at $URL (No Authentication)"
+          echo "=========================================="
+          echo ""
+
+          # 1. Create
+          echo "1. Creating item..."
+          curl -i -X "PUT" -H "Content-Type: application/json" \
+            -d '{"id": "test-1", "price": 100, "name": "Test Item"}' \
+            $URL/items
+          echo ""
+
+          # 2. Get All
+          echo "2. Getting all items..."
+          curl -i $URL/items
+          echo ""
+
+          # 3. Get One
+          echo "3. Getting item test-1..."
+          curl -i $URL/items/test-1
+          echo ""
+
+          # 4. Delete
+          echo "4. Deleting item test-1..."
+          curl -i -X "DELETE" $URL/items/test-1
+          echo ""
+
+      - name: Run Tests With Authentication
+        if: github.event.inputs.use_auth == 'yes'
+        run: |
+          URL=${{ github.event.inputs.api_url }}
+          TOKEN="${{ steps.get_token.outputs.JWT_TOKEN }}"
+          
+          echo "=========================================="
+          echo "Testing API at $URL (With Authentication)"
+          echo "=========================================="
+          echo ""
+
+          # 1. Create
+          echo "1. Creating item..."
+          curl -i -X "PUT" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: $TOKEN" \
+            -d '{"id": "test-auth-1", "price": 200, "name": "Authenticated Test Item"}' \
+            $URL/items
+          echo ""
+
+          # 2. Get All
+          echo "2. Getting all items..."
+          curl -i -H "Authorization: $TOKEN" $URL/items
+          echo ""
+
+          # 3. Get One
+          echo "3. Getting item test-auth-1..."
+          curl -i -H "Authorization: $TOKEN" $URL/items/test-auth-1
+          echo ""
+
+          # 4. Update
+          echo "4. Updating item test-auth-1..."
+          curl -i -X "PUT" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: $TOKEN" \
+            -d '{"id": "test-auth-1", "price": 250, "name": "Updated Test Item"}' \
+            $URL/items
+          echo ""
+
+          # 5. Delete
+          echo "5. Deleting item test-auth-1..."
+          curl -i -X "DELETE" -H "Authorization: $TOKEN" $URL/items/test-auth-1
+          echo ""
+
+          echo "=========================================="
+          echo "All tests completed!"
+          echo "=========================================="
